@@ -3,6 +3,10 @@
 
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QDateTime>
+#include <QSqlQueryModel>
+
+#define DateTimeFormat "yyyy-MM-dd hh:mm:ss"
 #define DatabaseType "QSQLITE"
 #define DatabaseName "database.db"
 #define DatabaseConnectName "conName"
@@ -16,9 +20,12 @@ MainWidget::MainWidget(QWidget *parent) :
     ui->setupUi(this);
 
     m_NetManger = new QNetworkAccessManager;
+    m_NetMangerDetail = new QNetworkAccessManager;
 
     QObject::connect(m_NetManger, SIGNAL(finished(QNetworkReply*)),
                      this, SLOT(NetworkReplyFinishedSlot(QNetworkReply*)));
+    QObject::connect(m_NetMangerDetail, SIGNAL(finished(QNetworkReply*)),
+                     this, SLOT(NetworkDetailReplyFinishedSlot(QNetworkReply*)));
 
     db = QSqlDatabase::addDatabase(DatabaseType);
     db.setDatabaseName(DatabaseName);
@@ -28,26 +35,46 @@ MainWidget::MainWidget(QWidget *parent) :
         QApplication::exit();
     }
 
+    //数据库操作
     QSqlQuery query;
+    //一整个网页
     qDebug()<<query.exec("select * from sqlite_master where tbl_name = \'" DatabaseTableHtmlList "\';");
     if(!query.next()){
         QSqlQuery q("create table " DatabaseTableHtmlList " (id integer PRIMARY KEY autoincrement"
+                                                          ",dateTime text"
                                                           ",url text"
                                                           ",html text"
                                                           ");"
                     );
     }
+    //每条url、对应的name、详细页面
     qDebug()<<query.exec("select * from sqlite_master where tbl_name = \'" DatabaseTableUrlList "\';");
     if(!query.next()){
         QSqlQuery q("create table " DatabaseTableUrlList " (id integer PRIMARY KEY autoincrement"
-                                                          ",url text"
-                                                          ",name text"
-                                                          ");"
+                                                         ",dateTime text"
+                                                         ",getted bool"
+                                                         ",url text"
+                                                         ",name text"
+                                                         ",html text"
+                                                         ");"
                     );
     }
 
     //自动获取下一页
     connect(ui->lineEditUrl,SIGNAL(textChanged(QString)),this,SLOT(on_checkBoxAuto_clicked()));
+    connect(ui->lineEditDetail,SIGNAL(textChanged(QString)),this,SLOT(on_checkBoxAutoDetail_clicked()));
+
+    //显示数据库
+    modelUrl = new QSqlQueryModel;
+    modelHtml = new QSqlQueryModel;
+    ui->tableViewPage->setModel(modelHtml);
+    ui->tableViewUrl->setModel(modelUrl);
+
+    //具体资源页测试
+    ui->tableViewUrl->setSelectionMode(QAbstractItemView::SingleSelection);
+    ui->tableViewUrl->setSelectionBehavior(QAbstractItemView::SelectRows);
+    connect(ui->tableViewUrl->selectionModel(),SIGNAL(currentRowChanged(QModelIndex,QModelIndex)),
+            this,SLOT(tableViewUrlCurrentRowChanged(QModelIndex,QModelIndex)));
 }
 
 MainWidget::~MainWidget()
@@ -84,8 +111,10 @@ void MainWidget::processListString(const QString &str, const QString &url)
         //插入
         if(!isHave){
             QSqlQuery query;
-            query.prepare("insert into " DatabaseTableUrlList " values (NULL,?,?)");
-            query.addBindValue(url);
+            query.prepare("insert into " DatabaseTableUrlList " values (NULL,?,?,?,?,NUll)");
+            query.addBindValue(QDateTime::currentDateTime().toString(DateTimeFormat));
+            query.addBindValue(false);
+            query.addBindValue("http://www.ygdy8.com"+url);
             query.addBindValue(name);
             dealQueryExec(query,"insert " DatabaseTableUrlList);
         }
@@ -145,12 +174,36 @@ void MainWidget::NetworkReplyFinishedSlot(QNetworkReply *m)
 
     //保存html网页
     QSqlQuery query;
-    query.prepare("insert into " DatabaseTableHtmlList " values (NULL,?,?)");
+    query.prepare("insert into " DatabaseTableHtmlList " values (NULL,?,?,?)");
+    query.addBindValue(QDateTime::currentDateTime().toString(DateTimeFormat));
     query.addBindValue(m->url().toString());
     query.addBindValue(bytes);
     dealQueryExec(query,"insert " DatabaseTableHtmlList);
     m->deleteLater();
     processListString(r,m->url().toString());
+}
+
+void MainWidget::NetworkDetailReplyFinishedSlot(QNetworkReply *m)
+{
+    QByteArray bytes = m->readAll();
+    qDebug()<<"NetworkDetailReplyFinishedSlot:"<<bytes.size()<<" url:"<<m->url().toString();
+    QString r= QString::fromLocal8Bit(bytes);
+
+    //保存html网页
+    QSqlQuery query;
+    query.prepare("update " DatabaseTableUrlList " set getted = 1, html = ? where url = ?");
+    query.addBindValue(bytes);
+    query.addBindValue(m->url().toString());
+    dealQueryExec(query,"update " DatabaseTableUrlList);
+    m->deleteLater();
+
+    listDetail.removeAt(0);
+    if(listDetail.size()){
+        ui->lineEditDetail->setText(listDetail.at(0));
+    }else{
+        ui->lineEditDetail->setText("完毕");
+    }
+    ui->plainTextEditHtml->setPlainText(r);
 }
 
 void MainWidget::on_pushButtonGet_clicked()
@@ -159,10 +212,59 @@ void MainWidget::on_pushButtonGet_clicked()
     ui->plainTextEdit->appendPlainText(ui->lineEditUrl->text());
 }
 
-
 void MainWidget::on_checkBoxAuto_clicked()
 {
     if(ui->checkBoxAuto->isChecked()){
         on_pushButtonGet_clicked();
     }
+}
+
+void MainWidget::on_pushButtonUrl_clicked()
+{
+    modelUrl->setQuery("SELECT * FROM " DatabaseTableUrlList);
+}
+
+void MainWidget::on_pushButtonPage_clicked()
+{
+    modelHtml->setQuery("SELECT * FROM " DatabaseTableHtmlList);
+}
+
+void MainWidget::on_pushButtonGetDetail_clicked()
+{
+    if(listDetail.size()==0){
+        QSqlQuery query("select url from " DatabaseTableUrlList " where getted = 0");
+        qDebug()<<query.lastError().text()<<"  "<<query.lastQuery();
+        while(query.next()){
+            listDetail.append(query.value(0).toString());
+        }
+        if(listDetail.size()>0){
+            ui->lineEditDetail->setText(listDetail.at(0));
+            on_pushButtonGetDetail_clicked();
+        }
+    }else{
+        QString url = ui->lineEditDetail->text();
+
+        m_NetMangerDetail->get(QNetworkRequest(QUrl(url)));
+        ui->plainTextEdit->appendPlainText(url);
+    }
+}
+
+void MainWidget::on_checkBoxAutoDetail_clicked()
+{
+    if(ui->checkBoxAutoDetail->isChecked()){
+        on_pushButtonGetDetail_clicked();
+    }
+}
+
+void MainWidget::tableViewUrlCurrentRowChanged(QModelIndex i1, QModelIndex i2)
+{
+    ui->plainTextEditHtml->clear();
+    //ui->plainTextEditHtml->appendPlainText(QString("column %1,row %2").arg(i1.column()).arg(i1.row()));
+    //ui->plainTextEditHtml->appendPlainText(QString("column %1,row %2").arg(i2.column()).arg(i2.row()));
+    int row = i1.row();
+    QByteArray bytes = ui->tableViewUrl->model()->index(row,5).data().toByteArray();
+    QString value = QString::fromLocal8Bit(bytes);
+    ui->plainTextEditHtml->appendPlainText(value);
+
+
 }
