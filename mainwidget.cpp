@@ -5,6 +5,9 @@
 #include <QSqlError>
 #include <QDateTime>
 #include <QSqlQueryModel>
+#include <QFile>
+#include <Qdir>
+#include <QMessageBox>
 
 #define DateTimeFormat "yyyy-MM-dd hh:mm:ss"
 #define DatabaseType "QSQLITE"
@@ -18,6 +21,16 @@ MainWidget::MainWidget(QWidget *parent) :
     ui(new Ui::MainWidget)
 {
     ui->setupUi(this);
+
+    if(QFile(DatabaseName).exists()){
+        switch(QMessageBox::question(this,"提示","是否删除数据库")){
+        case QMessageBox::Yes:
+            qDebug()<<QDir::current().remove(DatabaseName);
+            break;
+        default:
+            break;
+        }
+    }
 
     m_NetManger = new QNetworkAccessManager;
     m_NetMangerDetail = new QNetworkAccessManager;
