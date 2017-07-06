@@ -21,6 +21,7 @@ public:
 
 private:
     Ui::MainWidget *ui;
+    void debugMsg(const QString& s);
     QNetworkAccessManager *m_NetManger,*m_NetMangerDetail;
     QNetworkReply *m_Reply;
     void processListString(const QString& str,const QString& url);//处理内容列表的网页

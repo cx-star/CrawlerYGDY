@@ -8,6 +8,8 @@
 #include <QFile>
 #include <Qdir>
 #include <QMessageBox>
+#include <QStringList>
+#include <QTextDocumentFragment>
 
 #define DateTimeFormat "yyyy-MM-dd hh:mm:ss"
 #define DatabaseType "QSQLITE"
@@ -15,6 +17,7 @@
 #define DatabaseConnectName "conName"
 #define DatabaseTableHtmlList "HtmlList"
 #define DatabaseTableUrlList "UrlList"
+#define DatabaseTableMovieDetail "MovieDetail"
 
 MainWidget::MainWidget(QWidget *parent) :
     QWidget(parent),
@@ -72,6 +75,35 @@ MainWidget::MainWidget(QWidget *parent) :
                                                          ");"
                     );
     }
+    //url对应电影详细信息
+    qDebug()<<query.exec("select * from sqlite_master where tbl_name = \'" DatabaseTableMovieDetail "\';");
+    if(!query.next()){
+        QSqlQuery q("create table " DatabaseTableUrlList " (id integer PRIMARY KEY autoincrement"
+                                                         ",url text"
+                                                         ",fabushijian text"
+                                                         ",yiming text"
+                                                         ",pianming text"
+                                                         ",niandai text"
+                                                         ",guojia text"
+                                                         ",leibie text"
+                                                         ",yuyan text"
+                                                         ",zimu text"
+                                                         ",shangyingriqi text"
+                                                         ",IMDB text"
+                                                         ",douban text"
+                                                         ",wenjiangeshi text"
+                                                         ",wenjianchicun text"
+                                                         ",wenjiandaxiao text"
+                                                         ",pianchang text"
+                                                         ",daoyan text"
+                                                         ",zhuyan text"
+                                                         ",jieshao text"
+                                                         ",fengmian text"
+                                                         ",jietu text"
+                                                         ",xiazailianjie text"
+                                                         ");"
+                    );
+    }
 
     //自动获取下一页
     connect(ui->lineEditUrl,SIGNAL(textChanged(QString)),this,SLOT(on_checkBoxAuto_clicked()));
@@ -95,6 +127,11 @@ MainWidget::~MainWidget()
     delete ui;
 }
 
+void MainWidget::debugMsg(const QString &s)
+{
+    ui->plainTextEdit->appendPlainText(s);
+}
+
 void MainWidget::processListString(const QString &str, const QString &url)
 {
     //<a href="/html/gndy/dyzz/20170627/54349.html" class="ulink">2017年动作《金刚：骷髅岛》国英双语.BD中英双字幕</a>
@@ -110,7 +147,7 @@ void MainWidget::processListString(const QString &str, const QString &url)
         //插入前检查
         bool isHave=false;
 
-        QSqlQuery query("select * from " DatabaseTableUrlList " where url = '"+url+"'");
+        QSqlQuery query("select * from " DatabaseTableUrlList " where url = '" "http://www.ygdy8.com"+url+"'");
 
         if(query.next()){
             isHave=true;
@@ -222,7 +259,7 @@ void MainWidget::NetworkDetailReplyFinishedSlot(QNetworkReply *m)
 void MainWidget::on_pushButtonGet_clicked()
 {
     m_NetManger->get(QNetworkRequest(QUrl(ui->lineEditUrl->text())));
-    ui->plainTextEdit->appendPlainText(ui->lineEditUrl->text());
+    debugMsg(ui->lineEditUrl->text());
 }
 
 void MainWidget::on_checkBoxAuto_clicked()
@@ -244,7 +281,8 @@ void MainWidget::on_pushButtonPage_clicked()
 
 void MainWidget::on_pushButtonGetDetail_clicked()
 {
-    if(listDetail.size()==0){
+
+    if(ui->radioButtonDetailFromDatabase->isChecked() && listDetail.size()==0){
         QSqlQuery query("select url from " DatabaseTableUrlList " where getted = 0");
         qDebug()<<query.lastError().text()<<"  "<<query.lastQuery();
         while(query.next()){
@@ -258,7 +296,7 @@ void MainWidget::on_pushButtonGetDetail_clicked()
         QString url = ui->lineEditDetail->text();
 
         m_NetMangerDetail->get(QNetworkRequest(QUrl(url)));
-        ui->plainTextEdit->appendPlainText(url);
+        debugMsg(url);
     }
 }
 
@@ -278,6 +316,61 @@ void MainWidget::tableViewUrlCurrentRowChanged(QModelIndex i1, QModelIndex i2)
     QByteArray bytes = ui->tableViewUrl->model()->index(row,5).data().toByteArray();
     QString value = QString::fromLocal8Bit(bytes);
     ui->plainTextEditHtml->appendPlainText(value);
+    QRegExp exp;
+    exp.setMinimal(true);
 
+    QString FaBuShiJian;
+    QString FengMian;
+    QString JieTu;
+    QStringList zhuYaoNeiRongList;
+    QStringList downloadLinkList;
+    exp.setPattern("发布时间：(\\d+-\\d+-\\d+) .*'([^ ].*jpg).+(http.*jpg).+(http.*jpg).+(http.*jpg)");
+    if(exp.indexIn(value)){
+        FaBuShiJian = exp.cap(1);
+        FengMian = exp.cap(2);
+        JieTu = exp.cap(4);
+        qDebug()<<"FaBuShiJian:"<<FaBuShiJian<<"!";
+        qDebug()<<"FengMian:"<<FengMian<<"!";
+        qDebug()<<"JieTu:"<<JieTu<<"!";
+    }
+
+    exp.setPattern("下载地址");
+    int pos = exp.indexIn(value);
+    exp.setPattern("(ftp.*)\">");
+    while((pos=exp.indexIn(value,pos)) != -1){
+        qDebug()<<pos;
+        downloadLinkList.append(exp.cap(1));
+        pos+=exp.matchedLength()*2;
+    }
+    if(downloadLinkList.size())
+        qDebug()<<"下载链接:"<<downloadLinkList;
+
+    exp.setPattern("(◎.*)<br />[◎|<br />]");
+    exp.setMinimal(false);
+    if((pos=exp.indexIn(value))!=-1){
+        QString ZhuYaoNeiRong = exp.cap(1);
+        ZhuYaoNeiRong = ZhuYaoNeiRong.replace("<br />","");//去掉HTML回车，以◎分割
+        ZhuYaoNeiRong = ZhuYaoNeiRong.replace("&middot;","·");
+        ZhuYaoNeiRong = ZhuYaoNeiRong.replace("&hellip;","…");
+        ZhuYaoNeiRong = ZhuYaoNeiRong.replace("&mdash;","—");
+        ZhuYaoNeiRong = ZhuYaoNeiRong.replace("&nbsp;"," ");
+        ZhuYaoNeiRong = ZhuYaoNeiRong.replace("&ldquo;","“");
+        ZhuYaoNeiRong = ZhuYaoNeiRong.replace("&rdquo;","”");
+        ZhuYaoNeiRong = ZhuYaoNeiRong.replace(QRegExp("　{5,}"),";");//演员
+
+        //html to plain 一种方法
+//        QTextDocument text;
+//        text.setHtml(ZhuYaoNeiRong);
+//        ZhuYaoNeiRong = text.toPlainText();
+        //html to plain 二种方法
+//        ZhuYaoNeiRong = QTextDocumentFragment::fromHtml(ZhuYaoNeiRong).toPlainText();
+
+        zhuYaoNeiRongList = ZhuYaoNeiRong.split("◎");
+        foreach(QString s,zhuYaoNeiRongList){
+            debugMsg(s);
+        }
+
+        qDebug()<<zhuYaoNeiRongList;
+    }
 
 }
